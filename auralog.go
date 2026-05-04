@@ -12,34 +12,63 @@ import (
 	"time"
 )
 
+// Level is an Auralog wire log level.
 type Level string
 
 const (
+	// Version is the SDK version reported by the Go module.
 	Version = "0.1.0-beta.1"
 
+	// LevelDebug is used for verbose diagnostic logs.
 	LevelDebug Level = "debug"
-	LevelInfo  Level = "info"
-	LevelWarn  Level = "warn"
+	// LevelInfo is used for normal informational logs.
+	LevelInfo Level = "info"
+	// LevelWarn is used for warning logs.
+	LevelWarn Level = "warn"
+	// LevelError is used for error logs, which are sent through the single-log endpoint.
 	LevelError Level = "error"
+	// LevelFatal is used for fatal logs, which are sent through the single-log endpoint.
 	LevelFatal Level = "fatal"
 )
 
+// Metadata is the structured metadata bag attached to an Auralog entry.
+//
+// Object metadata merges directly with global metadata. Scalar metadata passed
+// to log methods is wrapped as {"value": ...}.
 type Metadata map[string]any
 
+// Config controls client behavior and ingest transport settings.
+//
+// Zero-valued optional fields are filled with production defaults by New.
+// APIKey is required.
 type Config struct {
-	APIKey                 string
-	Environment            string
-	Endpoint               string
-	FlushInterval          time.Duration
-	MaxBatchSize           int
-	MaxQueueSize           int
-	MaxRetryAttempts       int
-	RetryInitialDelay      time.Duration
-	RetryMaxDelay          time.Duration
-	HTTPTimeout            time.Duration
-	ShutdownTimeout        time.Duration
-	TraceID                string
-	GlobalMetadata         Metadata
+	// APIKey is the Auralog project API key. It is required.
+	APIKey string
+	// Environment is the environment label attached to each log.
+	Environment string
+	// Endpoint overrides the Auralog ingest endpoint.
+	Endpoint string
+	// FlushInterval controls how often the background worker flushes batch logs.
+	FlushInterval time.Duration
+	// MaxBatchSize is the maximum number of non-error logs sent per batch request.
+	MaxBatchSize int
+	// MaxQueueSize is the maximum number of pending logs retained in memory.
+	MaxQueueSize int
+	// MaxRetryAttempts is the number of attempts before a retryable log is dropped.
+	MaxRetryAttempts int
+	// RetryInitialDelay is the first retry delay after a retryable delivery failure.
+	RetryInitialDelay time.Duration
+	// RetryMaxDelay caps exponential retry backoff.
+	RetryMaxDelay time.Duration
+	// HTTPTimeout is the default HTTP client's per-request timeout.
+	HTTPTimeout time.Duration
+	// ShutdownTimeout is the default shutdown budget used by helpers.
+	ShutdownTimeout time.Duration
+	// TraceID is attached to each log entry. If empty, New generates one.
+	TraceID string
+	// GlobalMetadata is static metadata merged into each log entry.
+	GlobalMetadata Metadata
+	// GlobalMetadataSupplier is called synchronously for each log entry.
 	GlobalMetadataSupplier func() Metadata
 }
 
@@ -102,14 +131,22 @@ func (c Config) validate() error {
 	return nil
 }
 
+// LogEntry is the JSON-serializable log payload sent to Auralog ingest.
 type LogEntry struct {
-	Level       Level    `json:"level"`
-	Message     string   `json:"message"`
-	Environment string   `json:"environment"`
-	Timestamp   string   `json:"timestamp"`
-	Metadata    Metadata `json:"metadata,omitempty"`
-	StackTrace  string   `json:"stackTrace,omitempty"`
-	TraceID     string   `json:"traceId"`
+	// Level is the Auralog wire log level.
+	Level Level `json:"level"`
+	// Message is the human-readable log message.
+	Message string `json:"message"`
+	// Environment is the environment label for the log.
+	Environment string `json:"environment"`
+	// Timestamp is the UTC RFC3339 millisecond timestamp.
+	Timestamp string `json:"timestamp"`
+	// Metadata contains structured context for the log.
+	Metadata Metadata `json:"metadata,omitempty"`
+	// StackTrace contains an optional stack trace for error and fatal logs.
+	StackTrace string `json:"stackTrace,omitempty"`
+	// TraceID is the distributed trace identifier attached to the log.
+	TraceID string `json:"traceId"`
 }
 
 type queuedEntry struct {
@@ -117,16 +154,21 @@ type queuedEntry struct {
 	attempts int
 }
 
+// Client is the Auralog client.
+//
+// A Client is safe for concurrent use. Create one per process and share it
+// across goroutines. The client owns a background flusher goroutine; call
+// Shutdown to stop it deterministically.
 type Client struct {
 	mu        sync.Mutex
-	cond      *sync.Cond
 	config    Config
 	transport Transport
 
-	batchQueue  []queuedEntry
-	singleQueue []queuedEntry
-	inFlight    int
-	warnings    map[string]struct{}
+	batchQueue   []queuedEntry
+	singleQueue  []queuedEntry
+	inFlight     int
+	inFlightDone chan struct{}
+	warnings     map[string]struct{}
 
 	wake       chan struct{}
 	stop       chan struct{}
@@ -134,6 +176,11 @@ type Client struct {
 	stopOnce   sync.Once
 }
 
+// New constructs a client with the supplied transport, or the default HTTP
+// transport if none is provided.
+//
+// The returned client starts a background flusher goroutine. Call Shutdown when
+// the host process, CLI command, test, or serverless handler is done logging.
 func New(config Config, transport ...Transport) (*Client, error) {
 	config.applyDefaults()
 	if err := config.validate(); err != nil {
@@ -149,36 +196,67 @@ func New(config Config, transport ...Transport) (*Client, error) {
 	}
 
 	client := &Client{
-		config:     config,
-		transport:  t,
-		warnings:   make(map[string]struct{}),
-		wake:       make(chan struct{}, 1),
-		stop:       make(chan struct{}),
-		workerDone: make(chan struct{}),
+		config:       config,
+		transport:    t,
+		inFlightDone: closedChannel(),
+		warnings:     make(map[string]struct{}),
+		wake:         make(chan struct{}, 1),
+		stop:         make(chan struct{}),
+		workerDone:   make(chan struct{}),
 	}
-	client.cond = sync.NewCond(&client.mu)
 	go client.worker()
 	return client, nil
 }
 
-func (c *Client) Debug(message string, metadata ...any) { c.Log(LevelDebug, message, metadata...) }
-func (c *Client) Info(message string, metadata ...any)  { c.Log(LevelInfo, message, metadata...) }
-func (c *Client) Warn(message string, metadata ...any)  { c.Log(LevelWarn, message, metadata...) }
-func (c *Client) Error(message string, metadata ...any) { c.Log(LevelError, message, metadata...) }
-func (c *Client) Fatal(message string, metadata ...any) { c.Log(LevelFatal, message, metadata...) }
+// Debug queues a debug log.
+//
+// Metadata arguments may be a single Metadata/map value, a single scalar value
+// wrapped as {"value": ...}, or slog-style alternating key/value pairs.
+func (c *Client) Debug(message string, args ...any) { c.Log(LevelDebug, message, args...) }
 
-func (c *Client) ErrorWithStack(message string, stackTrace string, metadata ...any) {
-	c.enqueue(c.buildEntry(LevelError, message, stackTrace, metadataValue(metadata...)))
+// Info queues an info log.
+//
+// Metadata arguments may be a single Metadata/map value, a single scalar value
+// wrapped as {"value": ...}, or slog-style alternating key/value pairs.
+func (c *Client) Info(message string, args ...any) { c.Log(LevelInfo, message, args...) }
+
+// Warn queues a warning log.
+//
+// Metadata arguments may be a single Metadata/map value, a single scalar value
+// wrapped as {"value": ...}, or slog-style alternating key/value pairs.
+func (c *Client) Warn(message string, args ...any) { c.Log(LevelWarn, message, args...) }
+
+// Error queues an error log for the single-log endpoint.
+//
+// Metadata arguments may be a single Metadata/map value, a single scalar value
+// wrapped as {"value": ...}, or slog-style alternating key/value pairs.
+func (c *Client) Error(message string, args ...any) { c.Log(LevelError, message, args...) }
+
+// Fatal queues a fatal log for the single-log endpoint.
+//
+// Metadata arguments may be a single Metadata/map value, a single scalar value
+// wrapped as {"value": ...}, or slog-style alternating key/value pairs.
+func (c *Client) Fatal(message string, args ...any) { c.Log(LevelFatal, message, args...) }
+
+// ErrorWithStack queues an error log with an explicit stack trace.
+func (c *Client) ErrorWithStack(message string, stackTrace string, args ...any) {
+	c.enqueue(c.buildEntry(LevelError, message, stackTrace, metadataFromArgs(args...)))
 }
 
-func (c *Client) FatalWithStack(message string, stackTrace string, metadata ...any) {
-	c.enqueue(c.buildEntry(LevelFatal, message, stackTrace, metadataValue(metadata...)))
+// FatalWithStack queues a fatal log with an explicit stack trace.
+func (c *Client) FatalWithStack(message string, stackTrace string, args ...any) {
+	c.enqueue(c.buildEntry(LevelFatal, message, stackTrace, metadataFromArgs(args...)))
 }
 
-func (c *Client) Log(level Level, message string, metadata ...any) {
-	c.enqueue(c.buildEntry(level, message, "", metadataValue(metadata...)))
+// Log queues a log at level.
+//
+// Metadata arguments may be a single Metadata/map value, a single scalar value
+// wrapped as {"value": ...}, or slog-style alternating key/value pairs.
+func (c *Client) Log(level Level, message string, args ...any) {
+	c.enqueue(c.buildEntry(level, message, "", metadataFromArgs(args...)))
 }
 
+// Flush synchronously drains queued and in-flight logs until ctx is done.
 func (c *Client) Flush(ctx context.Context) error {
 	if ctx == nil {
 		ctx = context.Background()
@@ -186,17 +264,24 @@ func (c *Client) Flush(ctx context.Context) error {
 	return c.flushUntilEmpty(ctx)
 }
 
+// FlushWithTimeout synchronously drains queued and in-flight logs using timeout
+// as the flush budget.
 func (c *Client) FlushWithTimeout(timeout time.Duration) error {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 	return c.Flush(ctx)
 }
 
+// Shutdown stops the background worker and drains pending logs until ctx is done.
+//
+// Shutdown is idempotent. If this client is installed as the package global,
+// Shutdown also clears the package global so Init can be called again.
 func (c *Client) Shutdown(ctx context.Context) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
 	c.stopOnce.Do(func() { close(c.stop) })
+	defer clearGlobal(c)
 	select {
 	case <-c.workerDone:
 	case <-ctx.Done():
@@ -205,36 +290,52 @@ func (c *Client) Shutdown(ctx context.Context) error {
 	return c.flushUntilEmpty(ctx)
 }
 
+// ShutdownWithTimeout stops the background worker and drains pending logs using
+// timeout as the shutdown budget.
 func (c *Client) ShutdownWithTimeout(timeout time.Duration) error {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 	return c.Shutdown(ctx)
 }
 
+// TraceID returns the trace ID attached to newly built log entries.
 func (c *Client) TraceID() string {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.config.TraceID
 }
 
+// SetTraceID changes the trace ID attached to subsequently built log entries.
 func (c *Client) SetTraceID(traceID string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.config.TraceID = traceID
 }
 
+// SetGlobalMetadata replaces static metadata merged into subsequently built log entries.
 func (c *Client) SetGlobalMetadata(metadata Metadata) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.config.GlobalMetadata = cloneMetadata(metadata)
 }
 
+// SetGlobalMetadataSupplier sets a synchronous metadata supplier invoked for
+// subsequently built log entries.
+//
+// Supplier panics are recovered and self-logged once; the original log still
+// ships without supplier metadata.
 func (c *Client) SetGlobalMetadataSupplier(supplier func() Metadata) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.config.GlobalMetadataSupplier = supplier
 }
 
+// Recover reports a recovered panic as a fatal Auralog entry, attempts a
+// bounded shutdown, then re-panics.
+//
+// Use as defer client.Recover(ctx) at goroutine boundaries. The stack trace sent
+// to Auralog is captured before re-panicking; the Go runtime's re-panic stack is
+// the recover site.
 func (c *Client) Recover(ctx context.Context) {
 	if value := recover(); value != nil {
 		if ctx == nil {
@@ -293,9 +394,9 @@ func (c *Client) flushUntilEmpty(ctx context.Context) error {
 		if c.empty() {
 			return nil
 		}
-		if c.waitingOnInFlightOnly() {
+		if done, ok := c.inFlightOnlyDone(); ok {
 			select {
-			case <-time.After(5 * time.Millisecond):
+			case <-done:
 			case <-ctx.Done():
 				c.warnOnce("auralog: flush timed out with pending logs")
 				return ctx.Err()
@@ -353,6 +454,10 @@ func (c *Client) popBatch() ([]queuedEntry, bool) {
 	if len(c.singleQueue) > 0 {
 		entry := c.singleQueue[0]
 		c.singleQueue = c.singleQueue[1:]
+		c.singleQueue = compactQueue(c.singleQueue)
+		if c.inFlight == 0 {
+			c.inFlightDone = make(chan struct{})
+		}
 		c.inFlight++
 		return []queuedEntry{entry}, true
 	}
@@ -365,6 +470,10 @@ func (c *Client) popBatch() ([]queuedEntry, bool) {
 	}
 	entries := append([]queuedEntry(nil), c.batchQueue[:count]...)
 	c.batchQueue = c.batchQueue[count:]
+	c.batchQueue = compactQueue(c.batchQueue)
+	if c.inFlight == 0 {
+		c.inFlightDone = make(chan struct{})
+	}
 	c.inFlight++
 	return entries, false
 }
@@ -373,7 +482,9 @@ func (c *Client) finishInFlight() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.inFlight--
-	c.cond.Broadcast()
+	if c.inFlight == 0 {
+		close(c.inFlightDone)
+	}
 }
 
 func (c *Client) empty() bool {
@@ -382,10 +493,13 @@ func (c *Client) empty() bool {
 	return len(c.batchQueue) == 0 && len(c.singleQueue) == 0 && c.inFlight == 0
 }
 
-func (c *Client) waitingOnInFlightOnly() bool {
+func (c *Client) inFlightOnlyDone() (<-chan struct{}, bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	return len(c.batchQueue) == 0 && len(c.singleQueue) == 0 && c.inFlight > 0
+	if len(c.batchQueue) == 0 && len(c.singleQueue) == 0 && c.inFlight > 0 {
+		return c.inFlightDone, true
+	}
+	return nil, false
 }
 
 func (c *Client) enqueue(entry LogEntry) {
@@ -396,8 +510,10 @@ func (c *Client) enqueue(entry LogEntry) {
 	for len(c.batchQueue)+len(c.singleQueue) >= c.config.MaxQueueSize {
 		if len(c.batchQueue) > 0 {
 			c.batchQueue = c.batchQueue[1:]
+			c.batchQueue = compactQueue(c.batchQueue)
 		} else {
 			c.singleQueue = c.singleQueue[1:]
+			c.singleQueue = compactQueue(c.singleQueue)
 		}
 	}
 
@@ -412,17 +528,22 @@ func (c *Client) enqueue(entry LogEntry) {
 
 func (c *Client) requeueOrDrop(entries []queuedEntry, single bool) {
 	dropped := false
-	c.mu.Lock()
-	for i := len(entries) - 1; i >= 0; i-- {
+	retryable := make([]queuedEntry, 0, len(entries))
+	for i := range entries {
 		entries[i].attempts++
 		if entries[i].attempts >= c.config.MaxRetryAttempts {
 			dropped = true
 			continue
 		}
+		retryable = append(retryable, entries[i])
+	}
+
+	c.mu.Lock()
+	if len(retryable) > 0 {
 		if single {
-			c.singleQueue = append([]queuedEntry{entries[i]}, c.singleQueue...)
+			c.singleQueue = append(retryable, c.singleQueue...)
 		} else {
-			c.batchQueue = append([]queuedEntry{entries[i]}, c.batchQueue...)
+			c.batchQueue = append(retryable, c.batchQueue...)
 		}
 	}
 	c.mu.Unlock()
@@ -436,6 +557,8 @@ func (c *Client) buildEntry(level Level, message string, stackTrace string, meta
 	c.mu.Lock()
 	environment := c.config.Environment
 	traceID := c.config.TraceID
+	base := cloneMetadata(c.config.GlobalMetadata)
+	supplier := c.config.GlobalMetadataSupplier
 	c.mu.Unlock()
 
 	entry := LogEntry{
@@ -443,7 +566,7 @@ func (c *Client) buildEntry(level Level, message string, stackTrace string, meta
 		Message:     message,
 		Environment: environment,
 		Timestamp:   UTCTimestampMillis(time.Now()),
-		Metadata:    c.mergeMetadata(metadata),
+		Metadata:    c.mergeMetadata(metadata, base, supplier),
 		TraceID:     traceID,
 	}
 	if stackTrace != "" {
@@ -452,12 +575,7 @@ func (c *Client) buildEntry(level Level, message string, stackTrace string, meta
 	return entry
 }
 
-func (c *Client) mergeMetadata(metadata any) Metadata {
-	c.mu.Lock()
-	base := cloneMetadata(c.config.GlobalMetadata)
-	supplier := c.config.GlobalMetadataSupplier
-	c.mu.Unlock()
-
+func (c *Client) mergeMetadata(metadata any, base Metadata, supplier func() Metadata) Metadata {
 	out := Metadata{}
 	for key, value := range base {
 		out[key] = value
@@ -516,11 +634,26 @@ func (c *Client) notifyWorker() {
 	}
 }
 
-func metadataValue(metadata ...any) any {
-	if len(metadata) == 0 {
+func metadataFromArgs(args ...any) any {
+	if len(args) == 0 {
 		return nil
 	}
-	return metadata[0]
+	if len(args) == 1 {
+		return args[0]
+	}
+	metadata := Metadata{}
+	for i := 0; i < len(args); i += 2 {
+		key, ok := args[i].(string)
+		if !ok {
+			return args
+		}
+		if i+1 >= len(args) {
+			metadata[key] = nil
+			break
+		}
+		metadata[key] = args[i+1]
+	}
+	return metadata
 }
 
 func cloneMetadata(metadata Metadata) Metadata {
@@ -544,10 +677,29 @@ func resetTimer(timer *time.Timer, duration time.Duration) {
 	timer.Reset(duration)
 }
 
+func closedChannel() chan struct{} {
+	ch := make(chan struct{})
+	close(ch)
+	return ch
+}
+
+func compactQueue(queue []queuedEntry) []queuedEntry {
+	if len(queue) == 0 {
+		return nil
+	}
+	if cap(queue) > 64 && cap(queue) > len(queue)*2 {
+		return append([]queuedEntry(nil), queue...)
+	}
+	return queue
+}
+
+// UTCTimestampMillis formats t as UTC RFC3339 with millisecond precision and a
+// trailing Z, matching the Auralog SDK wire format.
 func UTCTimestampMillis(t time.Time) string {
 	return t.UTC().Format("2006-01-02T15:04:05.000Z")
 }
 
+// GenerateTraceID returns a UUIDv4-compatible trace ID.
 func GenerateTraceID() string {
 	bytes := make([]byte, 16)
 	if _, err := rand.Read(bytes); err != nil {

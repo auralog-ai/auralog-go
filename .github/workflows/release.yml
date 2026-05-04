@@ -24,7 +24,7 @@ jobs:
         run: go vet ./...
 
       - name: Test
-        run: go test -race ./...
+        run: go test -race -shuffle=on ./...
 
       - name: Create source archive
         run: |
@@ -36,4 +36,3 @@ jobs:
         with:
           files: auralog-go-${{ github.ref_name }}.tar.gz
           generate_release_notes: true
-

@@ -17,3 +17,15 @@ All notable changes to `auralog-go` are documented here. Format follows
 - `Metadata` support with global metadata and supplier support.
 - Panic reporting helper for explicit `defer client.Recover(ctx)` usage.
 
+### Changed
+
+- Documented all exported API surfaces for pkg.go.dev.
+- Log methods now support slog-style alternating key/value metadata arguments.
+- Flush waits on in-flight delivery notifications instead of polling.
+- Retry requeue prepends surviving entries in one operation.
+- HTTP transport self-logs are deduped and include `User-Agent: auralog-go/<version>`.
+
+### Tests
+
+- Added retry exhaustion, supplier panic, metadata argument, timestamp, slog group, and fuzz coverage.
+- CI and release workflows now run tests with `-shuffle=on`.

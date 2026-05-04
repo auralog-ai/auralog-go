@@ -25,6 +25,15 @@ func TestSlogHandler(t *testing.T) {
 	if metadata["service"] != "checkout" || metadata["order_id"] != "ord_1" {
 		t.Fatalf("metadata mismatch: %+v", metadata)
 	}
+	grouped := slog.New(NewSlogHandler(client, slog.LevelDebug).WithGroup("request"))
+	grouped.Warn("grouped", "id", "req_1")
+	if err := client.FlushWithTimeout(time.Second); err != nil {
+		t.Fatal(err)
+	}
+	request, ok := transport.batches[0][0].Metadata["request"].(Metadata)
+	if !ok || request["id"] != "req_1" {
+		t.Fatalf("group metadata mismatch: %+v", transport.batches[0][0].Metadata)
+	}
 	if !NewSlogHandler(client, slog.LevelWarn).Enabled(context.Background(), slog.LevelWarn) {
 		t.Fatal("warn level should be enabled")
 	}

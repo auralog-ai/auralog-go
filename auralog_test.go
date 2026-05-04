@@ -112,6 +112,27 @@ func TestWireFormatAndMetadata(t *testing.T) {
 	_ = client.ShutdownWithTimeout(time.Second)
 }
 
+func TestMetadataArguments(t *testing.T) {
+	transport := &recordingTransport{}
+	client, err := New(testConfig(), transport)
+	if err != nil {
+		t.Fatal(err)
+	}
+	client.Info("kv", "user_id", "u_1", "attempt", 2)
+	client.Info("scalar", "hello")
+	if err := client.FlushWithTimeout(time.Second); err != nil {
+		t.Fatal(err)
+	}
+	if transport.batches[0][0].Metadata["user_id"] != "u_1" ||
+		transport.batches[0][0].Metadata["attempt"] != 2 {
+		t.Fatalf("key/value metadata mismatch: %+v", transport.batches[0][0].Metadata)
+	}
+	if transport.batches[0][1].Metadata["value"] != "hello" {
+		t.Fatalf("scalar metadata mismatch: %+v", transport.batches[0][1].Metadata)
+	}
+	_ = client.ShutdownWithTimeout(time.Second)
+}
+
 func TestFlushDrainsAllBatches(t *testing.T) {
 	transport := &recordingTransport{}
 	cfg := testConfig()
@@ -159,6 +180,29 @@ func TestFlushWaitsForInFlightSend(t *testing.T) {
 	_ = client.ShutdownWithTimeout(time.Second)
 }
 
+func TestRetryExhaustionDropsEntries(t *testing.T) {
+	transport := &recordingTransport{
+		results: []SendResult{SendRetryableFailure, SendRetryableFailure, SendRetryableFailure},
+	}
+	cfg := testConfig()
+	cfg.MaxRetryAttempts = 2
+	client, err := New(cfg, transport)
+	if err != nil {
+		t.Fatal(err)
+	}
+	client.Info("drop me")
+	if err := client.FlushWithTimeout(time.Second); err != nil {
+		t.Fatal(err)
+	}
+	if len(transport.batches) != 2 {
+		t.Fatalf("attempts = %d, want 2", len(transport.batches))
+	}
+	if !client.empty() {
+		t.Fatal("expected retry-exhausted queue to be empty")
+	}
+	_ = client.ShutdownWithTimeout(time.Second)
+}
+
 func TestRetryPermanentFailureAndScalarMetadata(t *testing.T) {
 	retrying := &recordingTransport{results: []SendResult{SendRetryableFailure, SendSuccess}}
 	client, err := New(testConfig(), retrying)
@@ -189,6 +233,28 @@ func TestRetryPermanentFailureAndScalarMetadata(t *testing.T) {
 	}
 	if len(permanent.singles) != 1 {
 		t.Fatalf("permanent singles = %d, want 1", len(permanent.singles))
+	}
+	_ = client.ShutdownWithTimeout(time.Second)
+}
+
+func TestSupplierPanicDoesNotCrashLogging(t *testing.T) {
+	transport := &recordingTransport{}
+	client, err := New(testConfig(), transport)
+	if err != nil {
+		t.Fatal(err)
+	}
+	client.SetGlobalMetadataSupplier(func() Metadata {
+		panic("supplier exploded")
+	})
+	client.Info("still ships", Metadata{"local": true})
+	if err := client.FlushWithTimeout(time.Second); err != nil {
+		t.Fatal(err)
+	}
+	if len(transport.batches) != 1 {
+		t.Fatalf("batches = %d, want 1", len(transport.batches))
+	}
+	if transport.batches[0][0].Metadata["local"] != true {
+		t.Fatalf("local metadata missing: %+v", transport.batches[0][0].Metadata)
 	}
 	_ = client.ShutdownWithTimeout(time.Second)
 }
@@ -227,9 +293,11 @@ func TestRuntimeUpdatesAndValidation(t *testing.T) {
 
 func TestHTTPTransportWireAndFailureClassification(t *testing.T) {
 	var payloads []map[string]any
+	var userAgents []string
 	status := http.StatusOK
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		defer r.Body.Close()
+		userAgents = append(userAgents, r.UserAgent())
 		var payload map[string]any
 		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
 			t.Fatal(err)
@@ -248,6 +316,9 @@ func TestHTTPTransportWireAndFailureClassification(t *testing.T) {
 	if payloads[0]["projectApiKey"] != "aura_test" {
 		t.Fatalf("missing projectApiKey: %+v", payloads[0])
 	}
+	if userAgents[0] != "auralog-go/"+Version {
+		t.Fatalf("User-Agent = %q", userAgents[0])
+	}
 	status = http.StatusUnauthorized
 	if got := transport.SendSingle(context.Background(), LogEntry{}); got != SendPermanentFailure {
 		t.Fatalf("4xx result = %v", got)
@@ -256,4 +327,35 @@ func TestHTTPTransportWireAndFailureClassification(t *testing.T) {
 	if got := transport.SendSingle(context.Background(), LogEntry{}); got != SendRetryableFailure {
 		t.Fatalf("5xx result = %v", got)
 	}
+}
+
+func TestUTCTimestampMillis(t *testing.T) {
+	timestamp := UTCTimestampMillis(time.Date(2026, 5, 4, 1, 2, 3, 456789000, time.FixedZone("JST", 9*60*60)))
+	if timestamp != "2026-05-03T16:02:03.456Z" {
+		t.Fatalf("timestamp = %q", timestamp)
+	}
+}
+
+func FuzzGenerateTraceID(f *testing.F) {
+	f.Add(1)
+	f.Fuzz(func(t *testing.T, _ int) {
+		traceID := GenerateTraceID()
+		if ok, _ := regexp.MatchString(`^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$`, traceID); !ok {
+			t.Fatalf("invalid trace ID: %q", traceID)
+		}
+	})
+}
+
+func FuzzMetadataArguments(f *testing.F) {
+	f.Add("user_id", "u_1")
+	f.Fuzz(func(t *testing.T, key string, value string) {
+		client := &Client{warnings: make(map[string]struct{})}
+		metadata := client.mergeMetadata(metadataFromArgs(key, value), Metadata{"base": true}, nil)
+		if metadata["base"] != true {
+			t.Fatalf("base metadata missing: %+v", metadata)
+		}
+		if key != "" && metadata[key] != value {
+			t.Fatalf("argument metadata missing: key=%q value=%q metadata=%+v", key, value, metadata)
+		}
+	})
 }

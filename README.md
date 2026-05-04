@@ -88,6 +88,14 @@ client.SetGlobalMetadataSupplier(func() auralog.Metadata {
 
 Supplier panics are recovered and self-logged once; the original log still ships.
 
+Log methods accept either one metadata object, one scalar value, or slog-style
+alternating key/value pairs:
+
+```go
+client.Info("user signed in", "user_id", "123", "plan", "pro")
+client.Info("raw value", "hello")
+```
+
 ## slog Integration
 
 Use `NewSlogHandler` with Go's standard `log/slog` package:
@@ -98,6 +106,8 @@ logger.Error("payment failed", "order_id", "abc")
 ```
 
 Slog errors map to Auralog `error`, warnings map to `warn`, debug maps to `debug`, and other records map to `info`.
+
+See `examples/slog` for a runnable example.
 
 ## Panic Recovery
 
@@ -112,11 +122,14 @@ func handleRequest(ctx context.Context, client *auralog.Client) {
 
 `Recover` logs a fatal entry with the panic value and stack trace, attempts a bounded shutdown, and then re-panics.
 
+See `examples/recover` for a runnable example.
+
 ## Development
 
 ```bash
 go fmt ./...
 go test ./...
+go test -race -shuffle=on ./...
 go vet ./...
 ```
 
@@ -131,4 +144,3 @@ Found a vulnerability? See [SECURITY.md](./SECURITY.md) for how to report it.
 ## License
 
 [MIT](./LICENSE) © James Thomas
-
