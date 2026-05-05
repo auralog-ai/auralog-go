@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"runtime/debug"
+	"strings"
 	"sync"
 	"time"
 )
@@ -48,6 +49,11 @@ type Config struct {
 	Environment string
 	// Endpoint overrides the Auralog ingest endpoint.
 	Endpoint string
+	// AllowInsecureEndpoint permits non-https Endpoint values. By default,
+	// New rejects endpoints that do not begin with https:// to prevent a
+	// misconfigured AURALOG_ENDPOINT from silently downgrading every POST
+	// (which carries the project API key in its body) to plaintext.
+	AllowInsecureEndpoint bool
 	// FlushInterval controls how often the background worker flushes batch logs.
 	FlushInterval time.Duration
 	// MaxBatchSize is the maximum number of non-error logs sent per batch request.
@@ -117,6 +123,11 @@ func (c Config) validate() error {
 	}
 	if c.Endpoint == "" {
 		return errors.New("auralog: Endpoint is required")
+	}
+	// URI schemes are case-insensitive per RFC 3986 §3.1, so HTTPS:// is just
+	// as valid as https:// — lowercase before checking the prefix.
+	if !c.AllowInsecureEndpoint && !strings.HasPrefix(strings.ToLower(c.Endpoint), "https://") {
+		return errors.New("auralog: Endpoint must use https:// (set AllowInsecureEndpoint to override)")
 	}
 	if c.FlushInterval <= 0 || c.RetryInitialDelay <= 0 || c.RetryMaxDelay <= 0 ||
 		c.HTTPTimeout <= 0 || c.ShutdownTimeout <= 0 {
@@ -192,7 +203,13 @@ func New(config Config, transport ...Transport) (*Client, error) {
 		t = transport[0]
 	}
 	if t == nil {
-		t = NewHTTPTransport(config)
+		// Config has already passed validate above, so NewHTTPTransport's
+		// internal re-validation cannot fail here.
+		httpTransport, err := NewHTTPTransport(config)
+		if err != nil {
+			return nil, err
+		}
+		t = httpTransport
 	}
 
 	client := &Client{

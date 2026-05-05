@@ -53,6 +53,7 @@ func main() {
 | `APIKey` | `string` | required | Auralog project API key |
 | `Environment` | `string` | `production` | Environment label |
 | `Endpoint` | `string` | `https://ingest.auralog.ai` | Ingest endpoint override |
+| `AllowInsecureEndpoint` | `bool` | `false` | Permit a non-`https://` `Endpoint`. Off by default so a misconfigured `AURALOG_ENDPOINT=http://...` cannot silently downgrade requests carrying the project API key to plaintext. |
 | `FlushInterval` | `time.Duration` | `5s` | Time between background flushes |
 | `MaxBatchSize` | `int` | `50` | Maximum entries per `/v1/logs` request |
 | `MaxQueueSize` | `int` | `1000` | Maximum pending entries before dropping oldest |
