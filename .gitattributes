@@ -1,0 +1,5 @@
+# Force LF line endings on all platforms. Without this, Git on Windows
+# normalizes Go source files to CRLF on checkout, and `gofmt -l .` in CI
+# then reports every file as needing reformatting — failing the formatting
+# gate on the windows-latest runner while Linux and macOS pass.
+* text=auto eol=lf
