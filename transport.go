@@ -54,7 +54,12 @@ func NewHTTPTransport(config Config) *HTTPTransport {
 	return &HTTPTransport{
 		apiKey:   config.APIKey,
 		endpoint: strings.TrimRight(config.Endpoint, "/"),
-		client:   &http.Client{Timeout: timeout},
+		client: &http.Client{
+			Timeout: timeout,
+			CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
+				return http.ErrUseLastResponse
+			},
+		},
 		warnings: make(map[string]struct{}),
 	}
 }

@@ -3,10 +3,12 @@ package auralog
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"regexp"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -309,6 +311,7 @@ func TestHTTPTransportWireAndFailureClassification(t *testing.T) {
 
 	cfg := testConfig()
 	cfg.Endpoint = server.URL
+	cfg.AllowInsecureEndpoint = true
 	transport := NewHTTPTransport(cfg)
 	if got := transport.SendSingle(context.Background(), LogEntry{Level: LevelError, Message: "x"}); got != SendSuccess {
 		t.Fatalf("2xx result = %v", got)
@@ -326,6 +329,80 @@ func TestHTTPTransportWireAndFailureClassification(t *testing.T) {
 	status = http.StatusInternalServerError
 	if got := transport.SendSingle(context.Background(), LogEntry{}); got != SendRetryableFailure {
 		t.Fatalf("5xx result = %v", got)
+	}
+}
+
+func TestEndpointSchemeValidation(t *testing.T) {
+	insecure := testConfig()
+	insecure.Endpoint = "http://insecure.example"
+	if _, err := New(insecure, &recordingTransport{}); err == nil {
+		t.Fatal("expected error for plaintext endpoint")
+	}
+
+	allowed := testConfig()
+	allowed.Endpoint = "http://insecure.example"
+	allowed.AllowInsecureEndpoint = true
+	client, err := New(allowed, &recordingTransport{})
+	if err != nil {
+		t.Fatalf("AllowInsecureEndpoint did not permit http endpoint: %v", err)
+	}
+	_ = client.ShutdownWithTimeout(time.Second)
+
+	secure := testConfig()
+	secure.Endpoint = "https://secure.example"
+	client, err = New(secure, &recordingTransport{})
+	if err != nil {
+		t.Fatalf("https endpoint rejected: %v", err)
+	}
+	_ = client.ShutdownWithTimeout(time.Second)
+}
+
+func TestHTTPTransportDoesNotFollowRedirects(t *testing.T) {
+	var redirectTargetHits int32
+	var initialHits int32
+	var capturedAuth string
+	mux := http.NewServeMux()
+	mux.HandleFunc("/v1/logs/single", func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&initialHits, 1)
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_ = r.Body.Close()
+		var payload map[string]any
+		if err := json.Unmarshal(body, &payload); err == nil {
+			if key, ok := payload["projectApiKey"].(string); ok {
+				capturedAuth = key
+			}
+		}
+		w.Header().Set("Location", "/v1/logs/single/redirected")
+		w.WriteHeader(http.StatusTemporaryRedirect)
+	})
+	mux.HandleFunc("/v1/logs/single/redirected", func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&redirectTargetHits, 1)
+		w.WriteHeader(http.StatusOK)
+	})
+	server := httptest.NewServer(mux)
+	defer server.Close()
+
+	cfg := testConfig()
+	cfg.Endpoint = server.URL
+	cfg.AllowInsecureEndpoint = true
+	transport := NewHTTPTransport(cfg)
+
+	result := transport.SendSingle(context.Background(), LogEntry{Level: LevelError, Message: "x"})
+	// 307 is a 3xx — neither 2xx success, 4xx permanent, nor 5xx retryable.
+	// What we care about is that the body was NOT replayed to the redirect target.
+	_ = result
+
+	if got := atomic.LoadInt32(&redirectTargetHits); got != 0 {
+		t.Fatalf("client followed redirect: redirect target hit %d times", got)
+	}
+	if got := atomic.LoadInt32(&initialHits); got != 1 {
+		t.Fatalf("initial endpoint hit %d times, want 1", got)
+	}
+	if capturedAuth != "aura_test" {
+		t.Fatalf("initial request did not include projectApiKey: %q", capturedAuth)
 	}
 }
 
