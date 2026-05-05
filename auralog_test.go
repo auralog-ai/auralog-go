@@ -312,7 +312,10 @@ func TestHTTPTransportWireAndFailureClassification(t *testing.T) {
 	cfg := testConfig()
 	cfg.Endpoint = server.URL
 	cfg.AllowInsecureEndpoint = true
-	transport := NewHTTPTransport(cfg)
+	transport, err := NewHTTPTransport(cfg)
+	if err != nil {
+		t.Fatalf("NewHTTPTransport: %v", err)
+	}
 	if got := transport.SendSingle(context.Background(), LogEntry{Level: LevelError, Message: "x"}); got != SendSuccess {
 		t.Fatalf("2xx result = %v", got)
 	}
@@ -388,15 +391,21 @@ func TestHTTPTransportDoesNotFollowRedirects(t *testing.T) {
 	cfg := testConfig()
 	cfg.Endpoint = server.URL
 	cfg.AllowInsecureEndpoint = true
-	transport := NewHTTPTransport(cfg)
+	transport, err := NewHTTPTransport(cfg)
+	if err != nil {
+		t.Fatalf("NewHTTPTransport: %v", err)
+	}
 
 	result := transport.SendSingle(context.Background(), LogEntry{Level: LevelError, Message: "x"})
-	// 307 is a 3xx — neither 2xx success, 4xx permanent, nor 5xx retryable.
-	// What we care about is that the body was NOT replayed to the redirect target.
-	_ = result
-
+	// A 3xx response means ingest told us to go elsewhere; the SDK refuses
+	// to replay the API-key-bearing body to an unverified target, so the
+	// classification must be permanent (not retryable, or we'd hammer the
+	// same redirect MaxRetryAttempts times).
+	if result != SendPermanentFailure {
+		t.Fatalf("redirect classification = %v, want SendPermanentFailure", result)
+	}
 	if got := atomic.LoadInt32(&redirectTargetHits); got != 0 {
-		t.Fatalf("client followed redirect: redirect target hit %d times", got)
+		t.Fatalf("client followed redirect: redirect target hit %d times, want 0", got)
 	}
 	if got := atomic.LoadInt32(&initialHits); got != 1 {
 		t.Fatalf("initial endpoint hit %d times, want 1", got)

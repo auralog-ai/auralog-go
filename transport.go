@@ -45,8 +45,15 @@ type HTTPTransport struct {
 }
 
 // NewHTTPTransport constructs the default HTTP transport for config.
-func NewHTTPTransport(config Config) *HTTPTransport {
+//
+// NewHTTPTransport runs Config.validate so callers that bypass New cannot skip
+// the https scheme guard or other config invariants. It returns an error when
+// the configuration is invalid.
+func NewHTTPTransport(config Config) (*HTTPTransport, error) {
 	config.applyDefaults()
+	if err := config.validate(); err != nil {
+		return nil, err
+	}
 	timeout := config.HTTPTimeout
 	if timeout <= 0 {
 		timeout = 30 * time.Second
@@ -61,7 +68,7 @@ func NewHTTPTransport(config Config) *HTTPTransport {
 			},
 		},
 		warnings: make(map[string]struct{}),
-	}
+	}, nil
 }
 
 // SendBatch sends entries to /v1/logs.
@@ -103,6 +110,10 @@ func (t *HTTPTransport) postJSON(ctx context.Context, path string, body any) Sen
 
 	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
 		return SendSuccess
+	}
+	if resp.StatusCode >= 300 && resp.StatusCode < 400 {
+		t.warnOnce(fmt.Sprintf("auralog: refused to follow redirect from ingest (HTTP %d)", resp.StatusCode))
+		return SendPermanentFailure
 	}
 	if resp.StatusCode >= 400 && resp.StatusCode < 500 {
 		t.warnOnce(fmt.Sprintf("auralog: non-retryable HTTP %d from ingest", resp.StatusCode))

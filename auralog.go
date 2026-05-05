@@ -124,7 +124,9 @@ func (c Config) validate() error {
 	if c.Endpoint == "" {
 		return errors.New("auralog: Endpoint is required")
 	}
-	if !c.AllowInsecureEndpoint && !strings.HasPrefix(c.Endpoint, "https://") {
+	// URI schemes are case-insensitive per RFC 3986 §3.1, so HTTPS:// is just
+	// as valid as https:// — lowercase before checking the prefix.
+	if !c.AllowInsecureEndpoint && !strings.HasPrefix(strings.ToLower(c.Endpoint), "https://") {
 		return errors.New("auralog: Endpoint must use https:// (set AllowInsecureEndpoint to override)")
 	}
 	if c.FlushInterval <= 0 || c.RetryInitialDelay <= 0 || c.RetryMaxDelay <= 0 ||
@@ -201,7 +203,13 @@ func New(config Config, transport ...Transport) (*Client, error) {
 		t = transport[0]
 	}
 	if t == nil {
-		t = NewHTTPTransport(config)
+		// Config has already passed validate above, so NewHTTPTransport's
+		// internal re-validation cannot fail here.
+		httpTransport, err := NewHTTPTransport(config)
+		if err != nil {
+			return nil, err
+		}
+		t = httpTransport
 	}
 
 	client := &Client{
