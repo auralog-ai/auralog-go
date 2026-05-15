@@ -1,4 +1,4 @@
-package auralog
+package auralogs
 
 import (
 	"context"
@@ -10,7 +10,7 @@ type groupedAttr struct {
 	attr   slog.Attr
 }
 
-// SlogHandler is a slog.Handler that forwards records to Auralog.
+// SlogHandler is a slog.Handler that forwards records to Auralogs.
 //
 // It is safe to share through slog.Logger values. Use NewSlogHandler rather
 // than constructing it directly.
@@ -21,7 +21,7 @@ type SlogHandler struct {
 	groups []string
 }
 
-// NewSlogHandler constructs a slog.Handler that forwards records to Auralog.
+// NewSlogHandler constructs a slog.Handler that forwards records to Auralogs.
 //
 // The handler respects slog levels and WithGroup nesting. Handle does not read
 // trace IDs from context; set client trace IDs explicitly with SetTraceID when
@@ -38,7 +38,7 @@ func (h *SlogHandler) Enabled(_ context.Context, level slog.Level) bool {
 	return level >= h.level.Level()
 }
 
-// Handle converts a slog record into an Auralog entry.
+// Handle converts a slog record into an Auralogs entry.
 func (h *SlogHandler) Handle(_ context.Context, record slog.Record) error {
 	if h.client == nil {
 		return nil

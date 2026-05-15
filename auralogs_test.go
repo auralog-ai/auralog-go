@@ -1,4 +1,4 @@
-package auralog
+package auralogs
 
 import (
 	"context"
@@ -322,7 +322,7 @@ func TestHTTPTransportWireAndFailureClassification(t *testing.T) {
 	if payloads[0]["projectApiKey"] != "aura_test" {
 		t.Fatalf("missing projectApiKey: %+v", payloads[0])
 	}
-	if userAgents[0] != "auralog-go/"+Version {
+	if userAgents[0] != "auralogs-go/"+Version {
 		t.Fatalf("User-Agent = %q", userAgents[0])
 	}
 	status = http.StatusUnauthorized

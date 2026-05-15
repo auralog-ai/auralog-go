@@ -1,4 +1,4 @@
-package auralog
+package auralogs
 
 import (
 	"context"
@@ -12,7 +12,7 @@ var (
 	globalClient *Client
 )
 
-// Init creates and installs the process-wide Auralog client.
+// Init creates and installs the process-wide Auralogs client.
 //
 // Init returns an error if a global client is already installed. Use New when
 // you want multiple independent clients or a client that is not registered as
@@ -26,7 +26,7 @@ func Init(config Config) (*Client, error) {
 	defer globalMu.Unlock()
 	if globalClient != nil {
 		_ = client.ShutdownWithTimeout(client.config.ShutdownTimeout)
-		return nil, errors.New("auralog: global client is already initialized")
+		return nil, errors.New("auralogs: global client is already initialized")
 	}
 	globalClient = client
 	return client, nil

@@ -1,4 +1,4 @@
-package auralog
+package auralogs
 
 import (
 	"context"

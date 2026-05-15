@@ -6,11 +6,11 @@ import (
 	"os"
 	"time"
 
-	auralog "github.com/auralog-ai/auralog-go"
+	auralogs "github.com/auralogs-ai/auralogs-go"
 )
 
 func main() {
-	client, err := auralog.Init(auralog.Config{
+	client, err := auralogs.Init(auralogs.Config{
 		APIKey:      os.Getenv("AURALOG_API_KEY"),
 		Environment: "production",
 	})

@@ -1,8 +1,20 @@
 # Changelog
 
-All notable changes to `auralog-go` are documented here. Format follows
+All notable changes to `auralogs-go` are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [1.0.0] - 2026-05-15
+
+### Changed
+
+- **BREAKING: Renamed module path** `github.com/auralog-ai/auralog-go` → `github.com/auralogs-ai/auralogs-go`. Update import:
+  ```diff
+  - import "github.com/auralog-ai/auralog-go"
+  + import "github.com/auralogs-ai/auralogs-go"
+  ```
+- Default ingest endpoint updated `https://ingest.auralog.ai` → `https://ingest.auralogs.ai`.
+- Repository moved to https://github.com/auralogs-ai/auralogs-go.
 
 ## [0.1.0-beta.1] - 2026-05-04
 
@@ -23,7 +35,7 @@ All notable changes to `auralog-go` are documented here. Format follows
 - Log methods now support slog-style alternating key/value metadata arguments.
 - Flush waits on in-flight delivery notifications instead of polling.
 - Retry requeue prepends surviving entries in one operation.
-- HTTP transport self-logs are deduped and include `User-Agent: auralog-go/<version>`.
+- HTTP transport self-logs are deduped and include `User-Agent: auralogs-go/<version>`.
 
 ### Tests
 

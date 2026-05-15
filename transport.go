@@ -1,4 +1,4 @@
-package auralog
+package auralogs
 
 import (
 	"bytes"
@@ -24,7 +24,7 @@ const (
 	SendPermanentFailure
 )
 
-// Transport sends Auralog entries to an ingest backend.
+// Transport sends Auralogs entries to an ingest backend.
 //
 // Implement this interface to plug in a custom HTTP stack, proxy, recorder, or
 // test transport.
@@ -90,20 +90,20 @@ func (t *HTTPTransport) SendSingle(ctx context.Context, entry LogEntry) SendResu
 func (t *HTTPTransport) postJSON(ctx context.Context, path string, body any) SendResult {
 	payload, err := json.Marshal(body)
 	if err != nil {
-		t.warnOnce(fmt.Sprintf("auralog: failed to encode ingest payload: %v", err))
+		t.warnOnce(fmt.Sprintf("auralogs: failed to encode ingest payload: %v", err))
 		return SendPermanentFailure
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, t.endpoint+path, bytes.NewReader(payload))
 	if err != nil {
-		t.warnOnce(fmt.Sprintf("auralog: failed to build ingest request: %v", err))
+		t.warnOnce(fmt.Sprintf("auralogs: failed to build ingest request: %v", err))
 		return SendPermanentFailure
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("User-Agent", "auralog-go/"+Version)
+	req.Header.Set("User-Agent", "auralogs-go/"+Version)
 
 	resp, err := t.client.Do(req)
 	if err != nil {
-		t.warnOnce(fmt.Sprintf("auralog: HTTP delivery failure: %v", err))
+		t.warnOnce(fmt.Sprintf("auralogs: HTTP delivery failure: %v", err))
 		return SendRetryableFailure
 	}
 	defer resp.Body.Close()
@@ -112,14 +112,14 @@ func (t *HTTPTransport) postJSON(ctx context.Context, path string, body any) Sen
 		return SendSuccess
 	}
 	if resp.StatusCode >= 300 && resp.StatusCode < 400 {
-		t.warnOnce(fmt.Sprintf("auralog: refused to follow redirect from ingest (HTTP %d)", resp.StatusCode))
+		t.warnOnce(fmt.Sprintf("auralogs: refused to follow redirect from ingest (HTTP %d)", resp.StatusCode))
 		return SendPermanentFailure
 	}
 	if resp.StatusCode >= 400 && resp.StatusCode < 500 {
-		t.warnOnce(fmt.Sprintf("auralog: non-retryable HTTP %d from ingest", resp.StatusCode))
+		t.warnOnce(fmt.Sprintf("auralogs: non-retryable HTTP %d from ingest", resp.StatusCode))
 		return SendPermanentFailure
 	}
-	t.warnOnce(fmt.Sprintf("auralog: retryable HTTP %d from ingest", resp.StatusCode))
+	t.warnOnce(fmt.Sprintf("auralogs: retryable HTTP %d from ingest", resp.StatusCode))
 	return SendRetryableFailure
 }
 

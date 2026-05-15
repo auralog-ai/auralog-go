@@ -1,15 +1,15 @@
-# auralog-go (Beta)
+# auralogs-go (Beta)
 
-Go SDK for [Auralog](https://auralog.ai) — agentic logging and application awareness.
+Go SDK for [Auralogs](https://auralog.ai) — agentic logging and application awareness.
 
-Auralog uses Claude as an on-call engineer: it monitors your logs and errors, alerts you when something's wrong, and opens fix PRs automatically.
+Auralogs uses Claude as an on-call engineer: it monitors your logs and errors, alerts you when something's wrong, and opens fix PRs automatically.
 
 [![license](https://img.shields.io/badge/license-MIT-blue.svg)](./LICENSE)
 
 ## Install
 
 ```bash
-go get github.com/auralog-ai/auralog-go
+go get github.com/auralogs-ai/auralogs-go
 ```
 
 The beta targets Go 1.22+ and uses only the standard library.
@@ -24,21 +24,21 @@ import (
 	"os"
 	"time"
 
-	auralog "github.com/auralog-ai/auralog-go"
+	auralogs "github.com/auralogs-ai/auralogs-go"
 )
 
 func main() {
-	client, err := auralog.Init(auralog.Config{
+	client, err := auralogs.Init(auralogs.Config{
 		APIKey:      os.Getenv("AURALOG_API_KEY"),
 		Environment: "production",
 	})
 	if err != nil {
 		panic(err)
 	}
-	defer auralog.ShutdownWithTimeout(2 * time.Second)
+	defer auralogs.ShutdownWithTimeout(2 * time.Second)
 
-	client.Info("user signed in", auralog.Metadata{"user_id": "123"})
-	client.Error("payment failed", auralog.Metadata{"order_id": "abc"})
+	client.Info("user signed in", auralogs.Metadata{"user_id": "123"})
+	client.Error("payment failed", auralogs.Metadata{"order_id": "abc"})
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
@@ -50,7 +50,7 @@ func main() {
 
 | Option | Type | Default | Description |
 |---|---|---|---|
-| `APIKey` | `string` | required | Auralog project API key |
+| `APIKey` | `string` | required | Auralogs project API key |
 | `Environment` | `string` | `production` | Environment label |
 | `Endpoint` | `string` | `https://ingest.auralog.ai` | Ingest endpoint override |
 | `AllowInsecureEndpoint` | `bool` | `false` | Permit a non-`https://` `Endpoint`. Off by default so a misconfigured `AURALOG_ENDPOINT=http://...` cannot silently downgrade requests carrying the project API key to plaintext. |
@@ -63,7 +63,7 @@ func main() {
 | `HTTPTimeout` | `time.Duration` | `30s` | HTTP client request timeout |
 | `ShutdownTimeout` | `time.Duration` | `2s` | Default caller-provided shutdown budget |
 | `TraceID` | `string` | generated | Trace ID attached to every log |
-| `GlobalMetadata` | `auralog.Metadata` | none | Static metadata merged into every log |
+| `GlobalMetadata` | `auralogs.Metadata` | none | Static metadata merged into every log |
 | `GlobalMetadataSupplier` | `func() Metadata` | none | Callable metadata supplier, invoked per log |
 
 ## Transport Semantics
@@ -74,16 +74,16 @@ func main() {
 - 4xx ingest responses are permanent failures and are not retried.
 - 5xx ingest responses and network failures retry up to `MaxRetryAttempts`.
 - Delivery failures are self-logged once to stderr.
-- The project API key is sent in the JSON body as `projectApiKey`, matching the other Auralog SDKs and ingest wire format.
+- The project API key is sent in the JSON body as `projectApiKey`, matching the other Auralogs SDKs and ingest wire format.
 
 ## Metadata
 
-Metadata is `auralog.Metadata`, which is an alias for `map[string]any`. Scalar or array metadata is wrapped as `{ "value": ... }` so values are not silently discarded.
+Metadata is `auralogs.Metadata`, which is an alias for `map[string]any`. Scalar or array metadata is wrapped as `{ "value": ... }` so values are not silently discarded.
 
 ```go
-client.SetGlobalMetadata(auralog.Metadata{"service": "checkout"})
-client.SetGlobalMetadataSupplier(func() auralog.Metadata {
-	return auralog.Metadata{"tenant": currentTenant()}
+client.SetGlobalMetadata(auralogs.Metadata{"service": "checkout"})
+client.SetGlobalMetadataSupplier(func() auralogs.Metadata {
+	return auralogs.Metadata{"tenant": currentTenant()}
 })
 ```
 
@@ -102,11 +102,11 @@ client.Info("raw value", "hello")
 Use `NewSlogHandler` with Go's standard `log/slog` package:
 
 ```go
-logger := slog.New(auralog.NewSlogHandler(client, slog.LevelInfo))
+logger := slog.New(auralogs.NewSlogHandler(client, slog.LevelInfo))
 logger.Error("payment failed", "order_id", "abc")
 ```
 
-Slog errors map to Auralog `error`, warnings map to `warn`, debug maps to `debug`, and other records map to `info`.
+Slog errors map to Auralogs `error`, warnings map to `warn`, debug maps to `debug`, and other records map to `info`.
 
 See `examples/slog` for a runnable example.
 
@@ -115,7 +115,7 @@ See `examples/slog` for a runnable example.
 Go does not expose a safe process-wide panic hook. Use `defer client.Recover(ctx)` in goroutines where you want panic reporting:
 
 ```go
-func handleRequest(ctx context.Context, client *auralog.Client) {
+func handleRequest(ctx context.Context, client *auralogs.Client) {
 	defer client.Recover(ctx)
 	// work
 }

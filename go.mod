@@ -1,3 +1,3 @@
-module github.com/auralog-ai/auralog-go
+module github.com/auralogs-ai/auralogs-go
 
 go 1.22

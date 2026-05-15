@@ -6,11 +6,11 @@ import (
 	"os"
 	"time"
 
-	auralog "github.com/auralog-ai/auralog-go"
+	auralogs "github.com/auralogs-ai/auralogs-go"
 )
 
 func main() {
-	client, err := auralog.Init(auralog.Config{
+	client, err := auralogs.Init(auralogs.Config{
 		APIKey:      os.Getenv("AURALOG_API_KEY"),
 		Environment: "production",
 	})
@@ -20,9 +20,9 @@ func main() {
 	defer func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
-		_ = auralog.Shutdown(ctx)
+		_ = auralogs.Shutdown(ctx)
 	}()
 
-	client.Info("user signed in", auralog.Metadata{"user_id": "123"})
-	client.Error("payment failed", auralog.Metadata{"order_id": "abc"})
+	client.Info("user signed in", auralogs.Metadata{"user_id": "123"})
+	client.Error("payment failed", auralogs.Metadata{"order_id": "abc"})
 }

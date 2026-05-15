@@ -1,4 +1,4 @@
-package auralog
+package auralogs
 
 import (
 	"context"
@@ -13,7 +13,7 @@ import (
 	"time"
 )
 
-// Level is an Auralog wire log level.
+// Level is an Auralogs wire log level.
 type Level string
 
 const (
@@ -32,7 +32,7 @@ const (
 	LevelFatal Level = "fatal"
 )
 
-// Metadata is the structured metadata bag attached to an Auralog entry.
+// Metadata is the structured metadata bag attached to an Auralogs entry.
 //
 // Object metadata merges directly with global metadata. Scalar metadata passed
 // to log methods is wrapped as {"value": ...}.
@@ -43,11 +43,11 @@ type Metadata map[string]any
 // Zero-valued optional fields are filled with production defaults by New.
 // APIKey is required.
 type Config struct {
-	// APIKey is the Auralog project API key. It is required.
+	// APIKey is the Auralogs project API key. It is required.
 	APIKey string
 	// Environment is the environment label attached to each log.
 	Environment string
-	// Endpoint overrides the Auralog ingest endpoint.
+	// Endpoint overrides the Auralogs ingest endpoint.
 	Endpoint string
 	// AllowInsecureEndpoint permits non-https Endpoint values. By default,
 	// New rejects endpoints that do not begin with https:// to prevent a
@@ -83,7 +83,7 @@ func (c *Config) applyDefaults() {
 		c.Environment = "production"
 	}
 	if c.Endpoint == "" {
-		c.Endpoint = "https://ingest.auralog.ai"
+		c.Endpoint = "https://ingest.auralogs.ai"
 	}
 	if c.FlushInterval == 0 {
 		c.FlushInterval = 5 * time.Second
@@ -116,35 +116,35 @@ func (c *Config) applyDefaults() {
 
 func (c Config) validate() error {
 	if c.APIKey == "" {
-		return errors.New("auralog: APIKey is required")
+		return errors.New("auralogs: APIKey is required")
 	}
 	if c.Environment == "" {
-		return errors.New("auralog: Environment is required")
+		return errors.New("auralogs: Environment is required")
 	}
 	if c.Endpoint == "" {
-		return errors.New("auralog: Endpoint is required")
+		return errors.New("auralogs: Endpoint is required")
 	}
 	// URI schemes are case-insensitive per RFC 3986 §3.1, so HTTPS:// is just
 	// as valid as https:// — lowercase before checking the prefix.
 	if !c.AllowInsecureEndpoint && !strings.HasPrefix(strings.ToLower(c.Endpoint), "https://") {
-		return errors.New("auralog: Endpoint must use https:// (set AllowInsecureEndpoint to override)")
+		return errors.New("auralogs: Endpoint must use https:// (set AllowInsecureEndpoint to override)")
 	}
 	if c.FlushInterval <= 0 || c.RetryInitialDelay <= 0 || c.RetryMaxDelay <= 0 ||
 		c.HTTPTimeout <= 0 || c.ShutdownTimeout <= 0 {
-		return errors.New("auralog: durations must be greater than zero")
+		return errors.New("auralogs: durations must be greater than zero")
 	}
 	if c.MaxBatchSize <= 0 || c.MaxQueueSize <= 0 || c.MaxRetryAttempts <= 0 {
-		return errors.New("auralog: queue and retry sizes must be greater than zero")
+		return errors.New("auralogs: queue and retry sizes must be greater than zero")
 	}
 	if c.RetryMaxDelay < c.RetryInitialDelay {
-		return errors.New("auralog: RetryMaxDelay must be >= RetryInitialDelay")
+		return errors.New("auralogs: RetryMaxDelay must be >= RetryInitialDelay")
 	}
 	return nil
 }
 
-// LogEntry is the JSON-serializable log payload sent to Auralog ingest.
+// LogEntry is the JSON-serializable log payload sent to Auralogs ingest.
 type LogEntry struct {
-	// Level is the Auralog wire log level.
+	// Level is the Auralogs wire log level.
 	Level Level `json:"level"`
 	// Message is the human-readable log message.
 	Message string `json:"message"`
@@ -165,7 +165,7 @@ type queuedEntry struct {
 	attempts int
 }
 
-// Client is the Auralog client.
+// Client is the Auralogs client.
 //
 // A Client is safe for concurrent use. Create one per process and share it
 // across goroutines. The client owns a background flusher goroutine; call
@@ -302,7 +302,7 @@ func (c *Client) Shutdown(ctx context.Context) error {
 	select {
 	case <-c.workerDone:
 	case <-ctx.Done():
-		c.warnOnce("auralog: worker did not stop before shutdown timeout")
+		c.warnOnce("auralogs: worker did not stop before shutdown timeout")
 	}
 	return c.flushUntilEmpty(ctx)
 }
@@ -347,11 +347,11 @@ func (c *Client) SetGlobalMetadataSupplier(supplier func() Metadata) {
 	c.config.GlobalMetadataSupplier = supplier
 }
 
-// Recover reports a recovered panic as a fatal Auralog entry, attempts a
+// Recover reports a recovered panic as a fatal Auralogs entry, attempts a
 // bounded shutdown, then re-panics.
 //
 // Use as defer client.Recover(ctx) at goroutine boundaries. The stack trace sent
-// to Auralog is captured before re-panicking; the Go runtime's re-panic stack is
+// to Auralogs is captured before re-panicking; the Go runtime's re-panic stack is
 // the recover site.
 func (c *Client) Recover(ctx context.Context) {
 	if value := recover(); value != nil {
@@ -405,7 +405,7 @@ func (c *Client) flushUntilEmpty(ctx context.Context) error {
 	retryDelay := c.config.RetryInitialDelay
 	for {
 		if err := ctx.Err(); err != nil {
-			c.warnOnce("auralog: flush timed out with pending logs")
+			c.warnOnce("auralogs: flush timed out with pending logs")
 			return err
 		}
 		if c.empty() {
@@ -415,7 +415,7 @@ func (c *Client) flushUntilEmpty(ctx context.Context) error {
 			select {
 			case <-done:
 			case <-ctx.Done():
-				c.warnOnce("auralog: flush timed out with pending logs")
+				c.warnOnce("auralogs: flush timed out with pending logs")
 				return ctx.Err()
 			}
 			continue
@@ -428,7 +428,7 @@ func (c *Client) flushUntilEmpty(ctx context.Context) error {
 		select {
 		case <-time.After(retryDelay):
 		case <-ctx.Done():
-			c.warnOnce("auralog: retry budget exceeded during flush")
+			c.warnOnce("auralogs: retry budget exceeded during flush")
 			return ctx.Err()
 		}
 	}
@@ -456,7 +456,7 @@ func (c *Client) flushOnce(ctx context.Context) bool {
 	case SendSuccess:
 		return true
 	case SendPermanentFailure:
-		c.warnOnce("auralog: dropping logs after non-retryable delivery failure")
+		c.warnOnce("auralogs: dropping logs after non-retryable delivery failure")
 		return true
 	default:
 		c.requeueOrDrop(entries, single)
@@ -566,7 +566,7 @@ func (c *Client) requeueOrDrop(entries []queuedEntry, single bool) {
 	c.mu.Unlock()
 
 	if dropped {
-		c.warnOnce("auralog: dropping logs after retry attempts exhausted")
+		c.warnOnce("auralogs: dropping logs after retry attempts exhausted")
 	}
 }
 
@@ -625,7 +625,7 @@ func (c *Client) mergeMetadata(metadata any, base Metadata, supplier func() Meta
 func (c *Client) callSupplier(supplier func() Metadata) (metadata Metadata) {
 	defer func() {
 		if value := recover(); value != nil {
-			c.warnOnce(fmt.Sprintf("auralog: global metadata supplier failed: %v", value))
+			c.warnOnce(fmt.Sprintf("auralogs: global metadata supplier failed: %v", value))
 			metadata = nil
 		}
 	}()
@@ -711,7 +711,7 @@ func compactQueue(queue []queuedEntry) []queuedEntry {
 }
 
 // UTCTimestampMillis formats t as UTC RFC3339 with millisecond precision and a
-// trailing Z, matching the Auralog SDK wire format.
+// trailing Z, matching the Auralogs SDK wire format.
 func UTCTimestampMillis(t time.Time) string {
 	return t.UTC().Format("2006-01-02T15:04:05.000Z")
 }
