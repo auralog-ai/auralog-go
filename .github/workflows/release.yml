@@ -8,6 +8,8 @@ on:
 jobs:
   release:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
 
     steps:
       - uses: actions/checkout@v5
@@ -28,11 +30,11 @@ jobs:
 
       - name: Create source archive
         run: |
-          git archive --format=tar.gz --prefix=auralog-go-${GITHUB_REF_NAME}/ \
-            -o auralog-go-${GITHUB_REF_NAME}.tar.gz HEAD
+          git archive --format=tar.gz --prefix=auralogs-go-${GITHUB_REF_NAME}/ \
+            -o auralogs-go-${GITHUB_REF_NAME}.tar.gz HEAD
 
       - name: Publish GitHub release
         uses: softprops/action-gh-release@v2
         with:
-          files: auralog-go-${{ github.ref_name }}.tar.gz
+          files: auralogs-go-${{ github.ref_name }}.tar.gz
           generate_release_notes: true
