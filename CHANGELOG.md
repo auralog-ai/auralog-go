@@ -13,7 +13,7 @@ All notable changes to `auralogs-go` are documented here. Format follows
   - import "github.com/auralog-ai/auralog-go"
   + import "github.com/auralogs-ai/auralogs-go"
   ```
-- Default ingest endpoint updated `https://ingest.auralog.ai` → `https://ingest.auralogs.ai`.
+- Default ingest endpoint updated `https://ingest.auralogs.ai` → `https://ingest.auralogs.ai`.
 - Repository moved to https://github.com/auralogs-ai/auralogs-go.
 
 ## [0.1.0-beta.1] - 2026-05-04

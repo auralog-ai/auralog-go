@@ -1,6 +1,6 @@
 # auralogs-go (Beta)
 
-Go SDK for [Auralogs](https://auralog.ai) — agentic logging and application awareness.
+Go SDK for [Auralogs](https://auralogs.ai) — agentic logging and application awareness.
 
 Auralogs uses Claude as an on-call engineer: it monitors your logs and errors, alerts you when something's wrong, and opens fix PRs automatically.
 
@@ -52,7 +52,7 @@ func main() {
 |---|---|---|---|
 | `APIKey` | `string` | required | Auralogs project API key |
 | `Environment` | `string` | `production` | Environment label |
-| `Endpoint` | `string` | `https://ingest.auralog.ai` | Ingest endpoint override |
+| `Endpoint` | `string` | `https://ingest.auralogs.ai` | Ingest endpoint override |
 | `AllowInsecureEndpoint` | `bool` | `false` | Permit a non-`https://` `Endpoint`. Off by default so a misconfigured `AURALOG_ENDPOINT=http://...` cannot silently downgrade requests carrying the project API key to plaintext. |
 | `FlushInterval` | `time.Duration` | `5s` | Time between background flushes |
 | `MaxBatchSize` | `int` | `50` | Maximum entries per `/v1/logs` request |
@@ -136,7 +136,7 @@ go vet ./...
 
 ## Documentation
 
-Full docs at [docs.auralog.ai](https://docs.auralog.ai).
+Full docs at [docs.auralogs.ai](https://docs.auralogs.ai).
 
 ## Security
 
